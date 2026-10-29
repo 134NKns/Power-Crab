@@ -17,7 +17,7 @@ use smoltcp::{
     iface::{SocketSet, SocketStorage},
     socket::{
         dhcpv4::{Event as DhcpEvent, Socket as Dhcpv4Socket},
-        tcp::{Socket as TcpSocket, SocketBuffer as TcpSocketBuffer},
+        tcp::{Socket as TcpSocket, SocketBuffer as TcpSocketBuffer, State as TcpState},
         udp::{PacketBuffer as UdpPacketBuffer, PacketMetadata, Socket as UdpSocket},
     },
     wire::{IpAddress, IpCidr, IpEndpoint, Ipv4Address, Ipv4Cidr},
@@ -347,6 +347,13 @@ pub fn run_station_mode(
                     }
                 }
 
+                StationHttpRequest::Favicon => {
+                    let written = format_http_response(204, "image/x-icon", "", &mut http_resp_buf);
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
                 StationHttpRequest::Other => {
                     let body = r#"{"status":"error","message":"Endpoint not found"}"#;
                     let written = format_http_response(
@@ -367,11 +374,18 @@ pub fn run_station_mode(
             }
         }
 
-        // Re-arm HTTP listener if closed
+        // Re-arm HTTP listener immediately if closed or in lingering FIN/TIME wait states
         {
             let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
-            if !http_sock.is_active() && !http_sock.is_listening() {
-                let _ = http_sock.listen(80);
+            match http_sock.state() {
+                TcpState::Closed => {
+                    let _ = http_sock.listen(80);
+                }
+                TcpState::CloseWait | TcpState::TimeWait => {
+                    http_sock.abort();
+                    let _ = http_sock.listen(80);
+                }
+                _ => {}
             }
         }
 

@@ -18,6 +18,7 @@ pub const ADMIN_PASSWORD: &str = "pwd_1234";
 pub enum StationHttpRequest {
     GetDashboard,
     Wake,
+    Favicon,
     UpdateMac {
         mac_str: String<18>,
     },
@@ -112,14 +113,21 @@ pub fn parse_station_request(data: &[u8]) -> StationHttpRequest {
     let first_line = req_str.lines().next().unwrap_or("");
     let mut parts = first_line.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("");
+    let raw_path = parts.next().unwrap_or("");
 
-    if method == "GET" && (path == "/" || path == "/index.html") {
+    // Strip query string if any
+    let path = raw_path.split('?').next().unwrap_or("");
+
+    if (method == "GET" || method == "HEAD") && (path == "" || path == "/" || path == "/index.html") {
         return StationHttpRequest::GetDashboard;
     }
 
-    if (method == "POST" && path == "/api/wake") || (method == "GET" && path == "/wake") {
+    if (method == "POST" && path == "/api/wake") || ((method == "GET" || method == "HEAD") && path == "/wake") {
         return StationHttpRequest::Wake;
+    }
+
+    if path == "/favicon.ico" {
+        return StationHttpRequest::Favicon;
     }
 
     // Extract body if POST
@@ -196,6 +204,7 @@ fn hex_nibble(b: u8) -> u8 {
 pub fn format_http_response(status_code: u16, content_type: &str, body: &str, out: &mut [u8]) -> usize {
     let status_line = match status_code {
         200 => "200 OK",
+        204 => "204 No Content",
         400 => "400 Bad Request",
         401 => "401 Unauthorized",
         404 => "404 Not Found",
