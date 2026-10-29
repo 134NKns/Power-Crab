@@ -1,4 +1,4 @@
-//! Wi-Fi Credentials Data Model
+//! Wi-Fi Credentials & Target PC Configuration Data Model
 
 use heapless::String;
 
@@ -16,16 +16,21 @@ pub enum StorageError {
     InvalidUtf8,
 }
 
-/// Wi-Fi Credentials container
+/// Wi-Fi Credentials & Target PC container
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WifiCredentials {
     pub ssid: String<MAX_SSID_LEN>,
     pub password: String<MAX_PASS_LEN>,
+    pub target_mac: Option<[u8; 6]>,
 }
 
 impl WifiCredentials {
-    /// Create new credentials from string slices
-    pub fn new(ssid: &str, password: &str) -> Result<Self, StorageError> {
+    /// Create new credentials with optional target MAC
+    pub fn with_target_mac(
+        ssid: &str,
+        password: &str,
+        target_mac: Option<[u8; 6]>,
+    ) -> Result<Self, StorageError> {
         let mut s = String::new();
         s.push_str(ssid).map_err(|_| StorageError::BufferTooSmall)?;
 
@@ -35,6 +40,12 @@ impl WifiCredentials {
         Ok(Self {
             ssid: s,
             password: p,
+            target_mac,
         })
+    }
+
+    /// Create new credentials without target MAC
+    pub fn new(ssid: &str, password: &str) -> Result<Self, StorageError> {
+        Self::with_target_mac(ssid, password, None)
     }
 }

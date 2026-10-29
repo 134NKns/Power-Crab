@@ -56,7 +56,7 @@ fn main() -> ! {
 
     // Mode 1: If credentials exist in Flash, run in Station (STA) mode
     if let Some(creds) = saved_wifi {
-        run_station_mode(&init, peripherals.WIFI, &creds, &delay);
+        run_station_mode(&init, peripherals.WIFI, &creds, &delay, &mut storage);
     }
 
     // Mode 2: No credentials saved -> Run Captive Portal

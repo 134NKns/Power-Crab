@@ -11,6 +11,7 @@ pub mod portal;
 pub mod station;
 pub mod storage;
 pub mod traits;
+pub mod wol;
 
 // Convenient top-level re-exports
 pub use storage::{Storage, StorageError, WifiCredentials};

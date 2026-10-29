@@ -1,6 +1,6 @@
 # 🦀 Power-Crab: Agent Handover & Progress Notes
 
-Last Updated: `2026-10-30 01:10:00 +07:00`
+Last Updated: `2026-10-30 01:36:00 +07:00`
 
 ---
 
@@ -82,14 +82,31 @@ The ESP32 is physically plugged into **`COM3` on Windows PC `CODER`**, not on th
      - [`src/main.rs`](file:///Users/134nk/Code/Projects/free-wifi/src/main.rs): Clean boot orchestrator reduced from 444 lines to ~64 lines.
    - Tested and verified on physical ESP32 hardware via RFC2217.
 
+8. **Wake-on-LAN Subsystem, LAN Web Dashboard & Admin Security**:
+   - Implemented [`src/wol/`](file:///Users/134nk/Code/Projects/free-wifi/src/wol/): 102-byte Magic Packet generation (`0xFF * 6 + MAC * 16`), string parser & formatter, UDP port 9 broadcast.
+   - Enhanced Flash storage format to V2 with backward compatibility for V1: persists `target_mac` in Flash sector `0x3FF000`.
+   - Built Station LAN Web Server on TCP port 80:
+     - **Web Dashboard**: Responsive dark theme at `http://192.168.1.117`, status box, 1-click **⚡ WAKE UP PC** button, target MAC config form, and collapsible settings.
+     - **REST Endpoints**:
+       - `POST /api/wake` & `GET /wake`: Broadcasts WOL magic packet, returns JSON.
+       - `POST /api/config`: Updates target MAC address directly into Flash.
+       - `POST /api/wifi` (Protected): Changes Wi-Fi credentials; requires `admin=pwd_1234`.
+       - `POST /api/reset` (Protected): Factory resets Wi-Fi; requires `admin=pwd_1234`.
+   - Verified on physical ESP32 hardware:
+     - Booted into Station Mode at `192.168.1.117`.
+     - Saved Target MAC via API (`58:D3:12:AD:1C:E8`).
+     - Tested `POST /api/wake` -> 200 OK with Magic Packet sent.
+     - Tested Admin password protection on `/api/wifi` and `/api/reset` -> 401 Unauthorized on invalid passwords.
+     - Verified target MAC persists across chip reset.
+   - Prepared Open Source Assets:
+     - Created comprehensive [`README.md`](file:///Users/134nk/Code/Projects/free-wifi/README.md) with badges, features, architecture, and REST API documentation.
+     - Added [`LICENSE`](file:///Users/134nk/Code/Projects/free-wifi/LICENSE) (MIT).
+
 ---
 
-## 4. Next Steps: Wake-on-LAN (WOL) Service
+## 4. Next Steps & Enhancements
 
 1. **Station Mode Connection Timeout / Fallback**:
-   - If Wi-Fi fails to connect after N attempts (e.g., router offline or SSID/pass changed), fallback to `POWER-CRAB` Captive Portal so the device is never bricked.
-2. **Wake-on-LAN (WOL) Dispatcher**:
-   - Construct UDP Magic Packet (`0xFF * 6` + `Target_MAC * 16`).
-   - Broadcast to `255.255.255.255:9` or subnet directed broadcast `192.168.1.255:9`.
-3. **HTTP REST Trigger**:
-   - Listen on port 80 or 8080 when connected to home LAN (`http://192.168.1.117/wake`) to trigger WOL on demand.
+   - If router is unreachable on boot, timeout after 15 seconds and fall back to Captive Portal.
+2. **External Cloud / Tunnel / Webhook Integration**:
+   - Allow remote waking from outside the home network if desired.
