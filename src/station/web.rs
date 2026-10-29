@@ -19,6 +19,8 @@ pub enum StationHttpRequest {
     GetDashboard,
     Wake,
     Favicon,
+    /// CORS preflight — browser sends this before POST from a different origin
+    Preflight,
     UpdateMac {
         mac_str: String<18>,
     },
@@ -118,6 +120,11 @@ pub fn parse_station_request(data: &[u8]) -> StationHttpRequest {
     // Strip query string if any
     let path = raw_path.split('?').next().unwrap_or("");
 
+    // Handle CORS preflight for ALL paths (Brave/Chrome private network access fix)
+    if method == "OPTIONS" {
+        return StationHttpRequest::Preflight;
+    }
+
     if (method == "GET" || method == "HEAD") && (path == "" || path == "/" || path == "/index.html") {
         return StationHttpRequest::GetDashboard;
     }
@@ -211,8 +218,9 @@ pub fn format_http_response(status_code: u16, content_type: &str, body: &str, ou
         _ => "500 Internal Server Error",
     };
 
+    // Access-Control-Allow-Private-Network fixes Brave/Chrome private network access blocking
     let header = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\n\r\n",
         status_line,
         content_type,
         body.len()

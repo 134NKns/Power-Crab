@@ -354,6 +354,15 @@ pub fn run_station_mode(
                     http_sock.close();
                 }
 
+                StationHttpRequest::Preflight => {
+                    // Respond to CORS preflight (OPTIONS) — required for Brave/Chrome private network
+                    println!("🌐 [HTTP] CORS Preflight (OPTIONS) responded");
+                    let written = format_http_response(204, "text/plain", "", &mut http_resp_buf);
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
                 StationHttpRequest::Other => {
                     let body = r#"{"status":"error","message":"Endpoint not found"}"#;
                     let written = format_http_response(
