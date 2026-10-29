@@ -1,10 +1,10 @@
-//! Flash Storage Module for Wi-Fi Credentials
-//!
-//! Stores and retrieves Wi-Fi SSID and Password in a dedicated sector of ESP32 Flash memory.
+//! Flash Storage Implementation for ESP32
 
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use esp_storage::FlashStorage;
-use heapless::String;
+
+use super::creds::{StorageError, WifiCredentials, MAX_PASS_LEN, MAX_SSID_LEN};
+use crate::traits::WifiStorage;
 
 /// Flash address reserved for Wi-Fi credentials.
 /// Sector size on ESP32 is 4096 bytes (0x1000).
@@ -17,43 +17,6 @@ pub const STORAGE_MAGIC: [u8; 4] = [0x50, 0x43, 0x57, 0x46];
 
 /// Storage format version
 pub const STORAGE_VERSION: u8 = 1;
-
-pub const MAX_SSID_LEN: usize = 32;
-pub const MAX_PASS_LEN: usize = 64;
-
-/// Wi-Fi Credentials container
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WifiCredentials {
-    pub ssid: String<MAX_SSID_LEN>,
-    pub password: String<MAX_PASS_LEN>,
-}
-
-impl WifiCredentials {
-    /// Create new credentials from string slices
-    pub fn new(ssid: &str, password: &str) -> Result<Self, StorageError> {
-        let mut s = String::new();
-        s.push_str(ssid).map_err(|_| StorageError::BufferTooSmall)?;
-
-        let mut p = String::new();
-        p.push_str(password).map_err(|_| StorageError::BufferTooSmall)?;
-
-        Ok(Self {
-            ssid: s,
-            password: p,
-        })
-    }
-}
-
-/// Errors that can occur during storage operations
-#[derive(Debug)]
-pub enum StorageError {
-    FlashReadError,
-    FlashWriteError,
-    FlashEraseError,
-    BufferTooSmall,
-    CorruptedData,
-    InvalidUtf8,
-}
 
 /// Raw representation packed into Flash sector
 /// Total size: 4 (magic) + 1 (ver) + 1 (ssid_len) + 32 (ssid) + 1 (pass_len) + 64 (pass) + 1 (checksum) = 104 bytes
@@ -81,7 +44,7 @@ impl StoredPayload {
     }
 }
 
-/// Storage manager handle
+/// Hardware flash-backed storage manager
 pub struct Storage {
     flash: FlashStorage,
 }
@@ -101,11 +64,6 @@ impl Storage {
     }
 
     /// Read saved Wi-Fi credentials from Flash.
-    ///
-    /// Returns:
-    /// - `Ok(Some(creds))` if valid credentials exist in Flash
-    /// - `Ok(None)` if the sector is unwritten (blank flash 0xFF) or wiped
-    /// - `Err(StorageError)` if the flash could not be read or data is corrupted
     pub fn load_wifi(&mut self) -> Result<Option<WifiCredentials>, StorageError> {
         let mut buffer = [0u8; core::mem::size_of::<StoredPayload>()];
         self.flash
@@ -152,8 +110,6 @@ impl Storage {
     }
 
     /// Save new Wi-Fi credentials to Flash.
-    ///
-    /// Erases the 4KB sector and writes the new payload.
     pub fn save_wifi(&mut self, creds: &WifiCredentials) -> Result<(), StorageError> {
         let mut payload = StoredPayload {
             magic: STORAGE_MAGIC,
@@ -199,5 +155,19 @@ impl Storage {
             .erase(WIFI_CONFIG_FLASH_ADDR, WIFI_CONFIG_FLASH_ADDR + 4096)
             .map_err(|_| StorageError::FlashEraseError)?;
         Ok(())
+    }
+}
+
+impl WifiStorage for Storage {
+    fn load_wifi(&mut self) -> Result<Option<WifiCredentials>, StorageError> {
+        self.load_wifi()
+    }
+
+    fn save_wifi(&mut self, creds: &WifiCredentials) -> Result<(), StorageError> {
+        self.save_wifi(creds)
+    }
+
+    fn erase_wifi(&mut self) -> Result<(), StorageError> {
+        self.erase_wifi()
     }
 }

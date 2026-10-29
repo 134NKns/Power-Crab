@@ -72,6 +72,16 @@ The ESP32 is physically plugged into **`COM3` on Windows PC `CODER`**, not on th
    - If no credentials found (or empty):
      - Starts Captive Portal (`POWER-CRAB`), serves provisioning UI, tests credentials live, saves to flash, and reboots.
 
+7. **Clean Modular Folder & Trait Architecture**:
+   - Refactored monolith code into separate focused domain directories:
+     - [`src/traits/`](file:///Users/134nk/Code/Projects/free-wifi/src/traits/): `WifiStorage` abstraction for mockability & decoupling.
+     - [`src/storage/`](file:///Users/134nk/Code/Projects/free-wifi/src/storage/): `creds.rs` (data models) and `flash.rs` (ESP32 NOR flash implementation).
+     - [`src/portal/`](file:///Users/134nk/Code/Projects/free-wifi/src/portal/): `dhcp.rs` (RFC 2131 server), `dns.rs` (hijacker), `web.rs` (responsive HTML & parser), `mod.rs` (CaptivePortal runner).
+     - [`src/station/`](file:///Users/134nk/Code/Projects/free-wifi/src/station/): Station mode connection management & DHCP loop.
+     - [`src/net/`](file:///Users/134nk/Code/Projects/free-wifi/src/net/): Network time utilities (`now_instant`).
+     - [`src/main.rs`](file:///Users/134nk/Code/Projects/free-wifi/src/main.rs): Clean boot orchestrator reduced from 444 lines to ~64 lines.
+   - Tested and verified on physical ESP32 hardware via RFC2217.
+
 ---
 
 ## 4. Next Steps: Wake-on-LAN (WOL) Service
