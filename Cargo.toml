@@ -13,7 +13,8 @@ esp-backtrace = { version = "0.15", features = [
 esp-println = { version = "0.13", features = ["esp32", "log"] }
 log = "0.4"
 critical-section = "1.2"
-esp-wifi = { version = "0.12", features = ["esp32", "wifi", "log"] }
+esp-wifi = { version = "0.12", features = ["esp32", "wifi", "log", "utils", "smoltcp"] }
+smoltcp = { version = "0.12", default-features = false, features = ["medium-ethernet", "proto-ipv4", "socket-tcp", "socket-udp", "socket-raw", "proto-dhcpv4", "socket-dhcpv4"] }
 esp-storage = { version = "0.4", features = ["esp32", "nor-flash"] }
 embedded-storage = "0.3"
 heapless = "0.8"
