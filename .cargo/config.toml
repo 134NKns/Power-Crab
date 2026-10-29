@@ -1,0 +1,14 @@
+[build]
+target = "xtensa-esp32-none-elf"
+
+[unstable]
+build-std = ["core", "alloc"]
+
+[target.xtensa-esp32-none-elf]
+runner = "espflash flash --monitor --port rfc2217://100.78.132.62:7777?ign_set_control"
+rustflags = [
+    "-C", "link-arg=-Tlinkall.x",
+]
+
+[env]
+MCU = "esp32"

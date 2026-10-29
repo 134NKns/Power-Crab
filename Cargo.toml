@@ -1,6 +1,21 @@
 [package]
-name = "free-wifi"
+name = "power-crab"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+esp-hal = { version = "0.23", features = ["esp32"] }
+esp-backtrace = { version = "0.15", features = [
+    "esp32",
+    "panic-handler",
+    "println",
+] }
+esp-println = { version = "0.13", features = ["esp32", "log"] }
+log = "0.4"
+critical-section = "1.2"
+esp-wifi = { version = "0.12", features = ["esp32", "wifi", "log"] }
+esp-storage = { version = "0.4", features = ["esp32", "nor-flash"] }
+embedded-storage = "0.3"
+heapless = "0.8"
+esp-alloc = "0.6"
+picoserve = { version = "0.20", features = ["alloc", "log"] }
