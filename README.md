@@ -4,141 +4,212 @@
 [![Hardware](https://img.shields.io/badge/Target-ESP32--D0WD--V3-blue?style=flat-square&logo=espressif)](https://www.espressif.com/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![Framework](https://img.shields.io/badge/Framework-esp--hal%20v0.23-red?style=flat-square)](https://github.com/esp-rs/esp-hal)
+[![Network](https://img.shields.io/badge/Stack-smoltcp%20v0.12-purple?style=flat-square)](https://github.com/smoltcp-rs/smoltcp)
 
-**Power-Crab** is an ultra-fast, bare-metal (`no_std`) Rust firmware for the ESP32 that turns your board into a dedicated, offline-first **Wake-on-LAN (WOL) Station & Remote Power Gateway**.
+**Power-Crab** is an ultra-fast, bare-metal (`#![no_std]`) Rust firmware for the ESP32 that transforms low-cost microcontrollers into a dedicated, offline-first **Wake-on-LAN (WOL) Smart Appliance & Local Power Gateway**.
 
-It features an automated Captive Portal for Wi-Fi setup, a sleek dark-mode LAN Web Dashboard, a robust REST API for local automation, and Flash memory persistence — completely offline, private, and requiring zero external cloud services.
+It features automated **Captive Portal Wi-Fi setup**, **LAN Device Discovery (ARP/Ethernet Sniffer)** to select target computers without typing MAC addresses, a **Live PC Status monitor (Online / Offline / Waking up)**, a modern **Dark-Mode Web Dashboard**, and an instantaneous **REST API / Siri Webhook** — operating 100% within your private home network without external cloud, internet, or domain dependencies.
 
 ---
 
 ## ✨ Features
 
-- **🦀 Pure Bare-Metal Rust (`no_std`)**: Built on `esp-hal` (v0.23) and `smoltcp`. No heavy OS overhead, compiles in ~1.3 seconds, with instant sub-second boot times.
+- **🦀 Pure Bare-Metal Rust (`no_std`)**: Built on `esp-hal` (v0.23) and `smoltcp` (v0.12). Zero C runtime overhead, sub-second boot times, and compiles in ~2 seconds.
+- **🔍 Auto LAN Device Discovery (Zero-Manual MAC)**:
+  - Transparent Ethernet/ARP packet sniffer built into the PHY network layer.
+  - Automatically identifies active IP and MAC addresses across your local subnet.
+  - Interactive Web UI: Click **"👉 Use Target"** next to your computer to save its MAC address to Flash memory instantly.
+- **🟢 Live PC Status Indicator**:
+  - Real-time online/offline monitoring via Ethernet frame timing detection.
+  - Visual status badges: 🔴 **PC Offline** (Sleeping), 🟡 **Waking up...** (Pulsing animation during boot), 🟢 **PC Online**.
+- **⚡ RFC-Compliant Wake-on-LAN Engine**:
+  - Crafts raw 102-byte Magic Packets (`0xFF` × 6 + `MAC` × 16).
+  - Broadcasts across local subnet over UDP Port 9.
 - **📱 Zero-Touch Captive Portal (`POWER-CRAB`)**:
-  - Automatically pops up setup page on iOS, Android, macOS, and Windows.
+  - Pops up automatic Wi-Fi setup wizard on iOS, Android, macOS, and Windows.
   - Built-in RFC 2131 DHCP Server (UDP 67) & DNS Hijacker (UDP 53).
-  - Scans nearby Wi-Fi networks in real-time and provides a dropdown selector.
-  - Verifies credentials live before concluding setup.
-- **⚡ Wake-on-LAN (WOL) Engine**:
-  - Generates RFC-compliant 102-byte Magic Packets (`0xFF` × 6 + `MAC` × 16).
-  - Broadcasts across local subnet on UDP Port 9.
+  - Dynamic 2.4GHz Wi-Fi scanning with dropdown selector.
 - **🌐 Responsive LAN Web Dashboard**:
-  - Dark-mode minimal UI served directly on port 80.
-  - One-click **⚡ WAKE UP PC** button.
-  - Live status indicator (SSID, local IP, Gateway, Target PC MAC).
-  - Web-based Target MAC configuration without Wi-Fi resets.
+  - Dark-mode glassmorphism UI served on port 80.
+  - Big prominent **⚡ WAKE UP PC** button.
+  - Dynamic 2.4GHz Wi-Fi scanner dropdown in the admin settings.
+  - Fully compliant with Chrome & Brave **Private Network Access (PNA)** and CORS preflight (`OPTIONS`).
+- **📲 Siri Shortcuts, Apple Watch & Webhook Ready**:
+  - Instant trigger via `GET /wake` or `POST /api/wake`.
+  - One-click copyable shortcut URL for iOS Shortcuts (*"Hey Siri, turn on my PC"*), Stream Deck, or Home Assistant.
 - **🔐 Protected Admin Controls**:
-  - Sensitive operations (changing Wi-Fi credentials or factory reset) require the admin password (`pwd_1234`).
-- **💾 Flash Persistence**:
-  - Saved credentials and target MAC reside in Flash sector `0x3FF000` with magic headers and XOR checksums.
-  - Survives reboots and power outages.
+  - Changing Wi-Fi credentials or triggering a factory reset requires the admin password (`pwd_1234`).
+- **💾 Flash Memory Persistence (V2 Format)**:
+  - Stores Wi-Fi credentials and target MAC in NOR Flash sector `0x3FF000` with magic header verification and XOR checksums. Survives power cuts and reboots.
+- **🔒 100% Private & Offline**:
+  - Operates purely within your local network (`192.168.x.x`). No external domain, public DNS, or cloud service required.
 
 ---
 
 ## 🏗️ Architecture
 
+```mermaid
+flowchart TD
+    subgraph ESP32["🦀 ESP32 Hardware (240MHz Dual-Core, 4MB Flash)"]
+        direction TB
+        Boot["Smart Bootloader (main.rs)"]
+        Flash[("Flash Sector 0x3FF000\n(SSID, Password, Target MAC)")]
+        
+        subgraph NetStack["smoltcp Network Stack"]
+            Sniffer["ARP / Ethernet Sniffer (src/net/sniffer.rs)"]
+            Iface["Network Interface & Sockets"]
+            DHCP["DHCP Client / Server"]
+            TCP["TCP Port 80 (HTTP Server)"]
+            UDP["UDP Port 9 & 54321 (WOL / Discovery)"]
+        end
+    end
+
+    subgraph Portal["Captive Portal Mode (Unconfigured)"]
+        SoftAP["SoftAP 'POWER-CRAB'"]
+        DNS["DNS Hijacker (UDP 53)"]
+        SetupUI["Setup Wizard (Dropdown Wi-Fi)"]
+    end
+
+    subgraph Station["Station Mode (Connected to LAN)"]
+        Dashboard["LAN Dashboard (Glassmorphism Dark UI)"]
+        API["JSON REST API & Siri Webhook"]
+        DevScan["Subnet Device Discovery"]
+        StatusMonitor["Live PC Status (Online/Offline)"]
+    end
+
+    subgraph HomeLAN["🏠 Home Network (192.168.1.0/24)"]
+        Router["🌐 Home Router"]
+        TargetPC["🖥️ Target Computer\n(Wake-on-LAN enabled)"]
+        Client["📱 Phone / Mac / Stream Deck"]
+    end
+
+    Boot -->|Has Credentials| Station
+    Boot -->|No Credentials| Portal
+    Flash <-->|Load / Save| Boot
+
+    Station -->|Serve UI & API| Client
+    Station -->|Send Magic Packet| TargetPC
+    Station <-->|ARP / Packet Sniffing| HomeLAN
+    Station <-->|DHCP & Traffic| Router
 ```
-                                +---------------------------+
-                                |      ESP32 Hardware       |
-                                |  (esp-hal no_std, 240MHz) |
-                                +-------------+-------------+
-                                              |
-                   +--------------------------+--------------------------+
-                   |                                                     |
-         [Flash Sector 0x3FF000]                               [Wi-Fi Radio Mixed Mode]
-         - SSID & Password                                               |
-         - Target PC MAC                               +-----------------+-----------------+
-         - Checksum & Version                          |                                   |
-                                               [Captive Portal Mode]               [Station (STA) Mode]
-                                               - SoftAP "POWER-CRAB"               - Connects to Home Wi-Fi
-                                               - DHCP Server (UDP 67)              - DHCP Client (Gets Router IP)
-                                               - DNS Hijacker (UDP 53)             - LAN Dashboard (TCP 80)
-                                               - Provisioning UI                   - WOL Dispatcher (UDP 9)
+
+---
+
+## 📡 REST API Reference
+
+Power-Crab provides a fast, lightweight JSON REST API on port 80:
+
+| Method | Endpoint | Description | Auth Required |
+|---|---|---|---|
+| `POST` | `/api/wake` | Broadcasts WOL Magic packet to configured target MAC | No |
+| `GET` | `/wake` | Quick trigger endpoint (ideal for browser bookmarks & Siri) | No |
+| `GET` | `/api/status` | Returns target PC online/offline status & last seen seconds | No |
+| `GET` | `/api/devices` | Returns list of discovered LAN devices (`ip`, `mac`, `ago`) | No |
+| `POST` | `/api/scan-lan` | Dispatches active subnet sweep to discover new hosts | No |
+| `GET` | `/api/wifi/scan` | Scans nearby 2.4GHz Wi-Fi networks and signal strengths | No |
+| `POST` | `/api/config` | Updates the target computer MAC address in Flash | No |
+| `POST` | `/api/wifi` | Updates Wi-Fi credentials and reboots board | **Admin** (`pwd_1234`) |
+| `POST` | `/api/reset` | Erases Flash and restarts into Captive Portal mode | **Admin** (`pwd_1234`) |
+
+---
+
+### Example API Requests
+
+#### 1. Wake Target PC
+```bash
+curl -X POST http://192.168.1.117/api/wake
+# or simply:
+curl http://192.168.1.117/wake
+```
+**Response:**
+```json
+{
+  "status": "ok",
+  "message": "Magic packet sent",
+  "mac": "58:D3:12:AD:1C:E8"
+}
+```
+
+#### 2. Check Live PC Online Status
+```bash
+curl http://192.168.1.117/api/status
+```
+**Response:**
+```json
+{
+  "online": true,
+  "last_seen_sec": 4
+}
+```
+
+#### 3. List Discovered LAN Devices
+```bash
+curl http://192.168.1.117/api/devices
+```
+**Response:**
+```json
+[
+  { "ip": "192.168.1.1", "mac": "58:D3:12:AD:1C:E8", "ago": 5 },
+  { "ip": "192.168.1.102", "mac": "94:EC:13:72:2A:44", "ago": 3 },
+  { "ip": "192.168.1.111", "mac": "0E:80:4F:B0:F2:96", "ago": 0 }
+]
+```
+
+#### 4. Scan Nearby Wi-Fi Networks
+```bash
+curl http://192.168.1.117/api/wifi/scan
+```
+**Response:**
+```json
+[
+  { "ssid": "HELLO_WORLD_2.4G", "rssi": -42 },
+  { "ssid": "Office_Network", "rssi": -65 }
+]
+```
+
+#### 5. Save Target PC MAC Address
+```bash
+curl -X POST http://192.168.1.117/api/config -d "mac=04:D4:C4:4E:55:1A"
+```
+
+#### 6. Change Wi-Fi (Protected)
+```bash
+curl -X POST http://192.168.1.117/api/wifi \
+  -d "admin=pwd_1234&ssid=NewHomeWiFi&password=SecretPassword123"
 ```
 
 ---
 
-## 📡 LAN REST API Reference
+## 📲 Remote Access from Outside Home (Tailscale)
 
-When connected to your local network, Power-Crab exposes a clean JSON REST API on port 80:
+Power-Crab is an offline appliance designed for internal LAN networks, so you **do not need a public domain or port forwarding**.
 
-### 1. Trigger Wake-on-LAN
-Wakes the configured target PC by broadcasting an RFC Magic Packet.
-- **Endpoint**: `POST /api/wake` or `GET /wake`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "message": "Magic packet sent",
-    "mac": "58:D3:12:AD:1C:E8"
-  }
-  ```
-- **Example**:
-  ```bash
-  curl -X POST http://192.168.1.117/api/wake
-  # or in browser / iOS Shortcuts:
-  http://192.168.1.117/wake
-  ```
-
----
-
-### 2. Update Target PC MAC Address
-Updates the target computer's physical MAC address in Flash storage.
-- **Endpoint**: `POST /api/config`
-- **Headers**: `Content-Type: application/x-www-form-urlencoded`
-- **Body**: `mac=AA:BB:CC:DD:EE:FF`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "message": "Target MAC saved",
-    "mac": "AA:BB:CC:DD:EE:FF"
-  }
-  ```
-
----
-
-### 3. Change Wi-Fi Network (Protected)
-Changes the Wi-Fi network and reboots into Station Mode. Requires admin password.
-- **Endpoint**: `POST /api/wifi`
-- **Headers**: `Content-Type: application/x-www-form-urlencoded`
-- **Body**: `admin=pwd_1234&ssid=MyNetwork&password=secretpassword`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "message": "Wi-Fi updated! Rebooting..."
-  }
-  ```
-
----
-
-### 4. Factory Reset (Protected)
-Erases saved Wi-Fi and restarts into `POWER-CRAB` Captive Portal mode.
-- **Endpoint**: `POST /api/reset`
-- **Headers**: `Content-Type: application/x-www-form-urlencoded`
-- **Body**: `admin=pwd_1234`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "message": "Wi-Fi erased! Rebooting to Captive Portal..."
-  }
-  ```
+To access Power-Crab from outside your home securely:
+1. Run a **Tailscale Subnet Router** on any computer inside your home (e.g. Windows PC, Mac, Raspberry Pi, or Apple TV):
+   ```bash
+   tailscale up --advertise-routes=192.168.1.0/24
+   ```
+2. Enable the subnet route in your [Tailscale Admin Console](https://login.tailscale.com/admin/machines).
+3. Now, whenever your smartphone or laptop has Tailscale connected anywhere in the world, you can directly access `http://192.168.1.117` and wake your PC remotely!
 
 ---
 
 ## 🚀 Getting Started
 
+### Hardware Requirements
+- **Board**: Any standard ESP32 development board (e.g., ESP32-WROOM-32, NodeMCU ESP32, ESP32-D0WD-V3)
+- **Power**: 5V via Micro-USB / USB-C
+- **Target PC**: Motherboard with Wake-on-LAN (WOL) enabled in BIOS/UEFI and network adapter settings.
+
 ### Prerequisites
 
-1. **Rust with Xtensa support**: Install via [`espup`](https://github.com/esp-rs/espup):
+1. **Rust Toolchain with Xtensa Support**: Install via [`espup`](https://github.com/esp-rs/espup):
    ```bash
    cargo install espup
    espup install
    source "$HOME/export-esp.sh"
    ```
-2. **ESPFlash / esptool**:
+2. **Flash Tool**:
    ```bash
    cargo install espflash
    ```
@@ -146,17 +217,17 @@ Erases saved Wi-Fi and restarts into `POWER-CRAB` Captive Portal mode.
 ### Building & Flashing
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone git@github.com:134NKns/Power-Crab.git
 cd Power-Crab
 
-# Source Xtensa environment
+# 2. Source the Espressif toolchain environment
 source ~/export-esp.sh
 
-# Build release firmware
+# 3. Check and build release binary
 cargo +esp build --release
 
-# Flash via USB serial (replace /dev/ttyUSB0 with your port)
+# 4. Flash to ESP32 (replace /dev/ttyUSB0 or COM port with yours)
 espflash flash target/xtensa-esp32-none-elf/release/power-crab --port /dev/ttyUSB0 --monitor
 ```
 
@@ -165,37 +236,47 @@ espflash flash target/xtensa-esp32-none-elf/release/power-crab --port /dev/ttyUS
 ## 📁 Project Structure
 
 ```
-src/
-├── lib.rs              # Library root and re-exports
-├── main.rs             # Boot orchestrator (< 65 lines)
+Power-Crab/
+├── src/
+│   ├── lib.rs              # Module root and re-exports
+│   ├── main.rs             # Boot orchestrator (< 65 lines)
+│   │
+│   ├── traits/             # Abstraction interfaces
+│   │   └── storage.rs      # WifiStorage trait
+│   │
+│   ├── storage/            # NOR Flash persistence (Sector 0x3FF000)
+│   │   ├── creds.rs        # WifiCredentials struct (SSID, Password, Target MAC)
+│   │   └── flash.rs        # NOR Flash driver with XOR checksums
+│   │
+│   ├── wol/                # Wake-on-LAN subsystem
+│   │   ├── packet.rs       # 102-byte Magic packet generator & MAC parser
+│   │   └── mod.rs          # WOL module definitions
+│   │
+│   ├── portal/             # Captive Portal subsystem (Provisioning mode)
+│   │   ├── dhcp.rs         # RFC 2131 DHCP server (UDP 67)
+│   │   ├── dns.rs          # DNS hijacker (UDP 53)
+│   │   ├── web.rs          # Setup wizard HTML & parser (TCP 80)
+│   │   └── mod.rs          # Portal coordinator
+│   │
+│   ├── station/            # Station Mode subsystem (Home LAN operation)
+│   │   ├── web.rs          # LAN Web Dashboard HTML & REST API parser
+│   │   └── mod.rs          # HTTP server, DHCP client & WOL coordinator
+│   │
+│   └── net/                # Network utilities & packet inspection
+│       ├── sniffer.rs      # Passive & active Ethernet/ARP device sniffer
+│       ├── time.rs         # Monotonic clock for smoltcp
+│       └── mod.rs          # Net module exports
 │
-├── traits/             # Abstract interfaces
-│   └── storage.rs      # WifiStorage trait for testability
+├── scripts/
+│   ├── flash.sh            # One-click build and flash script
+│   └── monitor.sh          # Serial monitor script
 │
-├── storage/            # Flash memory persistence (Sector 0x3FF000)
-│   ├── creds.rs        # WifiCredentials data structure
-│   └── flash.rs        # NOR Flash driver implementing WifiStorage
-│
-├── wol/                # Wake-on-LAN subsystem
-│   ├── packet.rs       # 102-byte Magic packet generator & MAC parser
-│   └── mod.rs          # WOL module definitions
-│
-├── portal/             # Captive Portal subsystem (Hotspot)
-│   ├── dhcp.rs         # RFC 2131 DHCP server (UDP 67)
-│   ├── dns.rs          # DNS hijacker (UDP 53)
-│   ├── web.rs          # Offline HTML provisioning UI & HTTP parser (TCP 80)
-│   └── mod.rs          # Portal coordinator
-│
-├── station/            # Station Mode subsystem (Home Wi-Fi)
-│   ├── web.rs          # LAN Web Dashboard & REST API
-│   └── mod.rs          # Station connection coordinator & DHCP client
-│
-└── net/                # Network time utilities
-    └── time.rs         # System time conversion for smoltcp
+├── Cargo.toml              # Dependencies & compiler profiles
+└── LICENSE                 # MIT License
 ```
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is open-source and licensed under the [MIT License](LICENSE). Contributions, bug reports, and feature requests are welcome!
