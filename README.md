@@ -38,7 +38,7 @@ It features automated **Captive Portal Wi-Fi setup**, **LAN Device Discovery (AR
   - Instant trigger via `GET /wake` or `POST /api/wake`.
   - One-click copyable shortcut URL for iOS Shortcuts (*"Hey Siri, turn on my PC"*), Stream Deck, or Home Assistant.
 - **🔐 Protected Admin Controls**:
-  - Changing Wi-Fi credentials or triggering a factory reset requires the admin password (`pwd_1234`).
+  - Changing Wi-Fi credentials or triggering a factory reset requires the admin password (default: `pwd_1234`, configurable in code).
 - **💾 Flash Memory Persistence (V2 Format)**:
   - Stores Wi-Fi credentials and target MAC in NOR Flash sector `0x3FF000` with magic header verification and XOR checksums. Survives power cuts and reboots.
 - **🔒 100% Private & Offline**:
@@ -108,8 +108,8 @@ Power-Crab provides a fast, lightweight JSON REST API on port 80:
 | `POST` | `/api/scan-lan` | Dispatches active subnet sweep to discover new hosts | No |
 | `GET` | `/api/wifi/scan` | Scans nearby 2.4GHz Wi-Fi networks and signal strengths | No |
 | `POST` | `/api/config` | Updates the target computer MAC address in Flash | No |
-| `POST` | `/api/wifi` | Updates Wi-Fi credentials and reboots board | **Admin** (`pwd_1234`) |
-| `POST` | `/api/reset` | Erases Flash and restarts into Captive Portal mode | **Admin** (`pwd_1234`) |
+| `POST` | `/api/wifi` | Updates Wi-Fi credentials and reboots board | **Admin** (required) |
+| `POST` | `/api/reset` | Erases Flash and restarts into Captive Portal mode | **Admin** (required) |
 
 ---
 
@@ -117,22 +117,22 @@ Power-Crab provides a fast, lightweight JSON REST API on port 80:
 
 #### 1. Wake Target PC
 ```bash
-curl -X POST http://192.168.1.117/api/wake
+curl -X POST http://<ESP32_IP>/api/wake
 # or simply:
-curl http://192.168.1.117/wake
+curl http://<ESP32_IP>/wake
 ```
 **Response:**
 ```json
 {
   "status": "ok",
   "message": "Magic packet sent",
-  "mac": "58:D3:12:AD:1C:E8"
+  "mac": "AA:BB:CC:DD:EE:FF"
 }
 ```
 
 #### 2. Check Live PC Online Status
 ```bash
-curl http://192.168.1.117/api/status
+curl http://<ESP32_IP>/api/status
 ```
 **Response:**
 ```json
@@ -144,37 +144,37 @@ curl http://192.168.1.117/api/status
 
 #### 3. List Discovered LAN Devices
 ```bash
-curl http://192.168.1.117/api/devices
+curl http://<ESP32_IP>/api/devices
 ```
 **Response:**
 ```json
 [
-  { "ip": "192.168.1.1", "mac": "58:D3:12:AD:1C:E8", "ago": 5 },
-  { "ip": "192.168.1.102", "mac": "94:EC:13:72:2A:44", "ago": 3 },
-  { "ip": "192.168.1.111", "mac": "0E:80:4F:B0:F2:96", "ago": 0 }
+  { "ip": "192.168.1.1", "mac": "00:11:22:33:44:55", "ago": 5 },
+  { "ip": "192.168.1.102", "mac": "AA:BB:CC:DD:EE:01", "ago": 3 },
+  { "ip": "192.168.1.111", "mac": "AA:BB:CC:DD:EE:02", "ago": 0 }
 ]
 ```
 
 #### 4. Scan Nearby Wi-Fi Networks
 ```bash
-curl http://192.168.1.117/api/wifi/scan
+curl http://<ESP32_IP>/api/wifi/scan
 ```
 **Response:**
 ```json
 [
-  { "ssid": "HELLO_WORLD_2.4G", "rssi": -42 },
+  { "ssid": "Home_WiFi_2.4G", "rssi": -42 },
   { "ssid": "Office_Network", "rssi": -65 }
 ]
 ```
 
 #### 5. Save Target PC MAC Address
 ```bash
-curl -X POST http://192.168.1.117/api/config -d "mac=04:D4:C4:4E:55:1A"
+curl -X POST http://<ESP32_IP>/api/config -d "mac=AA:BB:CC:DD:EE:FF"
 ```
 
 #### 6. Change Wi-Fi (Protected)
 ```bash
-curl -X POST http://192.168.1.117/api/wifi \
+curl -X POST http://<ESP32_IP>/api/wifi \
   -d "admin=pwd_1234&ssid=NewHomeWiFi&password=SecretPassword123"
 ```
 
@@ -190,7 +190,7 @@ To access Power-Crab from outside your home securely:
    tailscale up --advertise-routes=192.168.1.0/24
    ```
 2. Enable the subnet route in your [Tailscale Admin Console](https://login.tailscale.com/admin/machines).
-3. Now, whenever your smartphone or laptop has Tailscale connected anywhere in the world, you can directly access `http://192.168.1.117` and wake your PC remotely!
+3. Now, whenever your smartphone or laptop has Tailscale connected anywhere in the world, you can directly access `http://<ESP32_IP>` and wake your PC remotely!
 
 ---
 

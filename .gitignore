@@ -4,3 +4,6 @@ sdkconfig
 sdkconfig.old
 components_esp32.lock
 .agent
+.env
+.env.*
+*.bin

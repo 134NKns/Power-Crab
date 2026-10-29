@@ -118,7 +118,7 @@ summary{{cursor:pointer;font-weight:600;color:var(--s);user-select:none}}
 </div></details>
 <details><summary>⚙️ Change Wi-Fi / Factory Reset (Admin)</summary>
 <div style="margin-top:.7rem">
-<input type="password" id="ap" placeholder="Admin Password (pwd_1234)">
+<input type="password" id="ap" placeholder="Admin Password">
 <button class="btn btn-s" onclick="scanWifi()">📶 Scan Nearby Wi-Fi</button>
 <select id="ws" onchange="pickWifi(this)"><option value="">-- เลือก Wi-Fi (หรือกด Scan) --</option></select>
 <input id="ns" placeholder="Wi-Fi SSID">
