@@ -2,12 +2,14 @@
 //!
 //! Connects to home Wi-Fi router, maintains DHCP lease,
 //! serves LAN Web Dashboard & REST API on port 80,
+//! provides passive & active LAN device discovery (ARP sniffer),
 //! and dispatches Wake-on-LAN Magic Packets.
 
 pub mod web;
 
 extern crate alloc;
 use alloc::format;
+use alloc::string::String as AllocString;
 use esp_hal::delay::Delay;
 use esp_println::println;
 use esp_wifi::wifi::{
@@ -24,7 +26,7 @@ use smoltcp::{
 };
 
 use crate::{
-    net::now_instant,
+    net::{now_instant, SnifferDevice},
     station::web::{
         format_http_response, generate_dashboard_html, parse_station_request,
         StationHttpRequest, ADMIN_PASSWORD,
@@ -33,7 +35,7 @@ use crate::{
     wol::{create_magic_packet, format_mac_address, parse_mac_address, WOL_PORT},
 };
 
-/// Runs Station Mode with LAN Web Dashboard, REST API, and Wake-on-LAN engine.
+/// Runs Station Mode with LAN Web Dashboard, REST API, Device Discovery, and WOL engine.
 pub fn run_station_mode(
     init: &esp_wifi::EspWifiController<'_>,
     wifi_peripheral: esp_hal::peripherals::WIFI,
@@ -51,9 +53,11 @@ pub fn run_station_mode(
         println!("🖥️  Target PC MAC: Not configured");
     }
 
-    let (mut iface, mut device, mut controller) =
+    let (mut iface, device, mut controller) =
         esp_wifi::wifi::utils::create_network_interface(init, wifi_peripheral, WifiStaDevice)
             .unwrap();
+
+    let mut sniffer = SnifferDevice::new(device);
 
     let sta_config = Configuration::Client(ClientConfiguration {
         ssid: creds.ssid.clone(),
@@ -74,20 +78,20 @@ pub fn run_station_mode(
     // 1. DHCP Client Socket
     let dhcp_socket = Dhcpv4Socket::new();
 
-    // 2. HTTP Server Socket (TCP port 80)
+    // 2. HTTP Server Socket (TCP port 80) - 12KB transmit buffer for full dashboard
     let mut http_rx_data = [0u8; 2048];
-    let mut http_tx_data = [0u8; 8192];
+    let mut http_tx_data = [0u8; 12288];
     let mut http_socket = TcpSocket::new(
         TcpSocketBuffer::new(&mut http_rx_data[..]),
         TcpSocketBuffer::new(&mut http_tx_data[..]),
     );
     http_socket.listen(80).unwrap();
 
-    // 3. UDP Socket for Wake-on-LAN Broadcast (port 54321)
-    let mut wol_rx_meta = [PacketMetadata::EMPTY; 2];
-    let mut wol_rx_data = [0u8; 256];
-    let mut wol_tx_meta = [PacketMetadata::EMPTY; 4];
-    let mut wol_tx_data = [0u8; 512];
+    // 3. UDP Socket for Wake-on-LAN Broadcast & LAN discovery probes (port 54321)
+    let mut wol_rx_meta = [PacketMetadata::EMPTY; 4];
+    let mut wol_rx_data = [0u8; 512];
+    let mut wol_tx_meta = [PacketMetadata::EMPTY; 8];
+    let mut wol_tx_data = [0u8; 1024];
     let mut wol_socket = UdpSocket::new(
         UdpPacketBuffer::new(&mut wol_rx_meta[..], &mut wol_rx_data[..]),
         UdpPacketBuffer::new(&mut wol_tx_meta[..], &mut wol_tx_data[..]),
@@ -105,11 +109,11 @@ pub fn run_station_mode(
     let mut connected_logged = false;
     let mut loop_count: u32 = 0;
     let mut http_req_buf = [0u8; 2048];
-    let mut http_resp_buf = [0u8; 8192];
+    let mut http_resp_buf = [0u8; 12288];
 
     loop {
         let timestamp = now_instant();
-        iface.poll(timestamp, &mut device, &mut sockets);
+        iface.poll(timestamp, &mut sniffer, &mut sockets);
 
         // ----------------------------------------------------
         // Handle DHCP Link & IP Allocation
@@ -157,7 +161,7 @@ pub fn run_station_mode(
         }
 
         // ----------------------------------------------------
-        // Handle LAN HTTP Server (Dashboard & REST API)
+        // Handle LAN HTTP Server (Dashboard, REST API & Discovery)
         // ----------------------------------------------------
         let mut req_len = 0;
         {
@@ -237,6 +241,130 @@ pub fn run_station_mode(
                         &body,
                         &mut http_resp_buf,
                     );
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
+                StationHttpRequest::GetDevices => {
+                    println!("🔍 [API] Serving Discovered LAN Devices");
+                    let now_ms = now_instant().total_millis().max(0) as u64;
+                    let mut json = AllocString::from("[");
+                    let mut first = true;
+                    for dev_opt in sniffer.devices() {
+                        if let Some(dev) = dev_opt {
+                            if !first {
+                                json.push(',');
+                            }
+                            first = false;
+                            let ago_sec = (now_ms.saturating_sub(dev.last_seen_ms)) / 1000;
+                            let mac_str = format_mac_address(dev.mac);
+                            let ip_str = format!("{}.{}.{}.{}", dev.ip[0], dev.ip[1], dev.ip[2], dev.ip[3]);
+                            json.push_str(&format!(
+                                r#"{{"ip":"{}","mac":"{}","ago":{}}}"#,
+                                ip_str, mac_str, ago_sec
+                            ));
+                        }
+                    }
+                    json.push(']');
+
+                    let written = format_http_response(200, "application/json", &json, &mut http_resp_buf);
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
+                StationHttpRequest::GetStatus => {
+                    let now_ms = now_instant().total_millis().max(0) as u64;
+                    let (online, last_seen_sec) = match current_target_mac {
+                        Some(mac) => {
+                            let alive = sniffer.is_alive(mac, now_ms, 30_000);
+                            let seen_ago = sniffer
+                                .find_by_mac(mac)
+                                .map(|d| (now_ms.saturating_sub(d.last_seen_ms)) / 1000)
+                                .unwrap_or(9999);
+                            (alive, seen_ago)
+                        }
+                        None => (false, 9999),
+                    };
+
+                    let body = format!(
+                        r#"{{"online":{},"last_seen_sec":{}}}"#,
+                        online, last_seen_sec
+                    );
+                    let written = format_http_response(200, "application/json", &body, &mut http_resp_buf);
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
+                StationHttpRequest::ScanLan => {
+                    println!("🔍 [LAN] Active subnet sweep initiated...");
+                    if let Some(gw) = gateway_ip {
+                        let octets = gw.octets();
+                        let wol_sock = sockets.get_mut::<UdpSocket>(wol_handle);
+
+                        // Broadcast probe
+                        let bcast = IpEndpoint::new(
+                            IpAddress::v4(octets[0], octets[1], octets[2], 255),
+                            54321,
+                        );
+                        let _ = wol_sock.send_slice(b"\x00", bcast);
+
+                        // Sweep common host IP ranges
+                        for host in 1..=30 {
+                            let ep = IpEndpoint::new(
+                                IpAddress::v4(octets[0], octets[1], octets[2], host),
+                                54321,
+                            );
+                            let _ = wol_sock.send_slice(b"\x00", ep);
+                        }
+                        for host in 100..=130 {
+                            let ep = IpEndpoint::new(
+                                IpAddress::v4(octets[0], octets[1], octets[2], host),
+                                54321,
+                            );
+                            let _ = wol_sock.send_slice(b"\x00", ep);
+                        }
+                    }
+
+                    let body = r#"{"status":"ok","message":"LAN sweep triggered"}"#;
+                    let written = format_http_response(200, "application/json", body, &mut http_resp_buf);
+                    let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
+                    let _ = http_sock.send_slice(&http_resp_buf[..written]);
+                    http_sock.close();
+                }
+
+                StationHttpRequest::ScanWifi => {
+                    println!("📶 [Wi-Fi] Scanning nearby networks...");
+                    let body = match controller.scan_n::<15>() {
+                        Ok((aps, _count)) => {
+                            let mut json = AllocString::from("[");
+                            let mut first = true;
+                            let mut seen = heapless::Vec::<heapless::String<32>, 15>::new();
+                            for ap in &aps {
+                                if !ap.ssid.is_empty() && !seen.contains(&ap.ssid) {
+                                    seen.push(ap.ssid.clone()).ok();
+                                    if !first {
+                                        json.push(',');
+                                    }
+                                    first = false;
+                                    json.push_str(&format!(
+                                        r#"{{"ssid":"{}","rssi":{}}}"#,
+                                        ap.ssid, ap.signal_strength
+                                    ));
+                                }
+                            }
+                            json.push(']');
+                            json
+                        }
+                        Err(e) => {
+                            println!("⚠️ [Wi-Fi] Scan failed: {:?}", e);
+                            AllocString::from("[]")
+                        }
+                    };
+
+                    let written = format_http_response(200, "application/json", &body, &mut http_resp_buf);
                     let http_sock = sockets.get_mut::<TcpSocket>(http_handle);
                     let _ = http_sock.send_slice(&http_resp_buf[..written]);
                     http_sock.close();
@@ -355,7 +483,6 @@ pub fn run_station_mode(
                 }
 
                 StationHttpRequest::Preflight => {
-                    // Respond to CORS preflight (OPTIONS) — required for Brave/Chrome private network
                     println!("🌐 [HTTP] CORS Preflight (OPTIONS) responded");
                     let written = format_http_response(204, "text/plain", "", &mut http_resp_buf);
                     let http_sock = sockets.get_mut::<TcpSocket>(http_handle);

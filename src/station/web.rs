@@ -1,7 +1,7 @@
 //! Station Mode LAN Web Dashboard & REST API
 //!
 //! Provides the local web dashboard, Wake-on-LAN trigger,
-//! and password-protected Wi-Fi/MAC configuration management.
+//! LAN device discovery, live PC status, and password-protected Wi-Fi/MAC configuration.
 
 extern crate alloc;
 use alloc::format;
@@ -19,8 +19,11 @@ pub enum StationHttpRequest {
     GetDashboard,
     Wake,
     Favicon,
-    /// CORS preflight — browser sends this before POST from a different origin
     Preflight,
+    GetDevices,
+    GetStatus,
+    ScanLan,
+    ScanWifi,
     UpdateMac {
         mac_str: String<18>,
     },
@@ -52,50 +55,91 @@ pub fn generate_dashboard_html(
         None => AllocString::new(),
     };
 
-    format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Power-Crab</title><style>
-:root{{--b:#0f111a;--c:#1a1c29;--t:#fff;--s:#8f9bb3;--a:#2ed573}}
-*{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,sans-serif}}
-body{{background:var(--b);color:var(--t);display:flex;justify-content:center;padding:1.5rem}}
-.card{{width:100%;max-width:390px;background:var(--c);border:1px solid #2a2e45;border-radius:14px;padding:1.5rem}}
-h1{{font-size:1.35rem;text-align:center;margin-bottom:.3rem}}
-.badge{{display:table;margin:0 auto 1rem;padding:.2rem .6rem;border-radius:10px;font-size:.75rem;background:#2ed57322;color:var(--a)}}
-.box{{background:#ffffff08;border-radius:10px;padding:.8rem;margin-bottom:1rem;font-size:.85rem;line-height:1.6}}
-.r{{display:flex;justify-content:space-between}}.l{{color:var(--s)}}.v{{font-weight:600}}
-.btn{{width:100%;padding:.85rem;border-radius:10px;border:none;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:1rem}}
-.btn-w{{background:linear-gradient(135deg,#2ed573,#1e90ff);color:#fff}}
-.btn-s{{background:#2f3542;color:#fff;font-size:.85rem;padding:.7rem}}
-.btn-d{{background:#ff475722;color:#ff4757;border:1px solid #ff475744;font-size:.85rem;padding:.7rem}}
-input{{width:100%;padding:.65rem;border-radius:8px;border:1px solid #2a2e45;background:#12141f;color:#fff;margin:.3rem 0 .7rem;font-size:.9rem}}
-details{{background:#ffffff05;border-radius:8px;padding:.7rem;margin-top:.8rem;font-size:.85rem}}
-summary{{cursor:pointer;font-weight:600;color:var(--s)}}
-.msg{{display:none;padding:.6rem;border-radius:8px;margin-bottom:1rem;font-size:.85rem;text-align:center}}
+    format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🦀 Power-Crab</title><style>
+:root{{--b:#0b0d14;--c:#141724;--cb:#1e2235;--t:#f1f2f6;--s:#8f9bb3;--a:#2ed573;--w:#ffa502;--d:#ff4757;--p:#3742fa}}
+*{{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif}}
+body{{background:var(--b);color:var(--t);display:flex;justify-content:center;padding:1.2rem;min-height:100vh}}
+.card{{width:100%;max-width:420px;background:var(--c);border:1px solid #252a3d;border-radius:16px;padding:1.5rem;box-shadow:0 8px 30px rgba(0,0,0,0.5)}}
+h1{{font-size:1.45rem;text-align:center;margin-bottom:.2rem}}
+.sub{{text-align:center;color:var(--s);font-size:.78rem;margin-bottom:.9rem}}
+.badges{{display:flex;justify-content:center;gap:.5rem;margin-bottom:1.1rem;flex-wrap:wrap}}
+.badge{{padding:.25rem .65rem;border-radius:12px;font-size:.75rem;font-weight:600}}
+.b-lan{{background:#2ed5731f;color:var(--a);border:1px solid #2ed5733d}}
+.b-on{{background:#2ed57322;color:var(--a);border:1px solid #2ed57355}}
+.b-off{{background:#ff475722;color:var(--d);border:1px solid #ff475755}}
+.b-waking{{background:#ffa50222;color:var(--w);border:1px solid #ffa50255;animation:pulse 1.2s infinite}}
+@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.5}}}}
+.box{{background:#ffffff06;border:1px solid #252a3d;border-radius:12px;padding:.85rem;margin-bottom:1rem;font-size:.85rem;line-height:1.65}}
+.r{{display:flex;justify-content:space-between;align-items:center}}.l{{color:var(--s)}}.v{{font-weight:600;font-family:monospace}}
+.btn{{width:100%;padding:.85rem;border-radius:10px;border:none;font-size:.95rem;font-weight:700;cursor:pointer;transition:.2s;display:flex;align-items:center;justify-content:center;gap:.5rem}}
+.btn:hover{{opacity:.92}}
+.btn-w{{background:linear-gradient(135deg,#2ed573,#1e90ff);color:#fff;font-size:1.05rem;padding:.95rem;box-shadow:0 4px 15px #2ed57333;margin-bottom:.8rem}}
+.btn-s{{background:var(--cb);color:#fff;border:1px solid #2d334d;font-size:.82rem;padding:.65rem;margin-bottom:.5rem}}
+.btn-pick{{background:#2ed57322;color:var(--a);border:1px solid #2ed57344;padding:.35rem .65rem;border-radius:6px;font-size:.75rem;cursor:pointer;font-weight:600}}
+.btn-pick:hover{{background:var(--a);color:#000}}
+.btn-d{{background:#ff475722;color:var(--d);border:1px solid #ff475744;font-size:.82rem;padding:.65rem}}
+input,select{{width:100%;padding:.65rem .75rem;border-radius:8px;border:1px solid #2d334d;background:#0d0f17;color:#fff;margin:.3rem 0 .7rem;font-size:.88rem;outline:none}}
+input:focus,select:focus{{border-color:#3742fa}}
+.dev-list{{max-height:180px;overflow-y:auto;margin:.6rem 0;display:flex;flex-direction:column;gap:.4rem}}
+.dev-item{{background:#ffffff05;border:1px solid #252a3d;border-radius:8px;padding:.5rem .7rem;display:flex;justify-content:space-between;align-items:center;font-size:.8rem}}
+.dev-ip{{font-weight:700;color:#fff}}.dev-mac{{font-family:monospace;color:var(--s);font-size:.75rem}}
+details{{background:#ffffff04;border:1px solid #252a3d;border-radius:10px;padding:.7rem;margin-top:.8rem;font-size:.85rem}}
+summary{{cursor:pointer;font-weight:600;color:var(--s);user-select:none}}
+.msg{{display:none;padding:.65rem;border-radius:8px;margin-bottom:1rem;font-size:.85rem;text-align:center;font-weight:600}}
+.tag{{font-size:.7rem;color:var(--s);margin-bottom:.2rem;display:block}}
 </style></head><body><div class="card">
-<h1>🦀 Power-Crab</h1><div class="badge">● Online on LAN</div>
-<div id="m" class="msg"></div>
-<div class="box">
-<div class="r"><span class="l">SSID:</span><span class="v">{ssid}</span></div>
-<div class="r"><span class="l">IP:</span><span class="v">{ip}</span></div>
-<div class="r"><span class="l">Gateway:</span><span class="v">{gateway}</span></div>
-<div class="r"><span class="l">Target MAC:</span><span class="v" id="mdisp">{mac_display}</span></div>
+<h1>🦀 Power-Crab</h1>
+<div class="sub">Local Wake-on-LAN Appliance (Internal LAN)</div>
+<div class="badges">
+<span class="badge b-lan">● LAN: {ip}</span>
+<span id="st" class="badge b-off">Checking PC...</span>
 </div>
-<button class="btn btn-w" onclick="wake()">⚡ WAKE UP PC</button>
-<label style="font-size:.8rem;color:var(--s)">Target PC MAC:</label>
-<input id="mac" placeholder="e.g. 58:D3:12:AD:1C:E8" value="{mac_val}">
+<div id="m" class="msg"></div>
+<button id="bw" class="btn btn-w" onclick="wake()">⚡ WAKE UP PC</button>
+<div class="box">
+<div class="r"><span class="l">Target PC MAC:</span><span class="v" id="mdisp">{mac_display}</span></div>
+<div class="r"><span class="l">Connected Wi-Fi:</span><span class="v">{ssid}</span></div>
+<div class="r"><span class="l">Gateway:</span><span class="v">{gateway}</span></div>
+</div>
+<details open><summary>🔍 Find PC on LAN (ไม่ต้องพิมพ์ MAC)</summary>
+<div style="margin-top:.7rem">
+<button class="btn btn-s" onclick="scanLan()">🔍 Scan Active Devices in Home</button>
+<div id="dl" class="dev-list"><div style="text-align:center;color:var(--s);font-size:.8rem;padding:.8rem">กดปุ่มสแกนเพื่อค้นหาเครื่องในวง LAN</div></div>
+<span class="tag">หรือระบุ MAC ด้วยตนเอง:</span>
+<input id="mac" placeholder="XX:XX:XX:XX:XX:XX" value="{mac_val}">
 <button class="btn btn-s" onclick="saveMac()">💾 Save Target MAC</button>
-<details><summary>⚙️ Change Wi-Fi / Reset (Admin)</summary>
-<div style="margin-top:.8rem">
+</div></details>
+<details><summary>📲 Local Shortcut &amp; Webhook URL</summary>
+<div style="margin-top:.7rem">
+<span class="tag">Direct Wake URL (สำหรับ iOS Shortcuts / Siri / Stream Deck):</span>
+<input id="hu" readonly value="http://{ip}/wake">
+<button class="btn btn-s" onclick="copyHook()">📋 Copy Shortcut URL</button>
+<div style="font-size:.75rem;color:var(--s);line-height:1.4">ทำงานเฉพาะภายในบ้านเท่านั้น ปลอดภัย 100% ไม่ต้องใช้ Domain หรือเน็ตนอกบ้าน</div>
+</div></details>
+<details><summary>⚙️ Change Wi-Fi / Factory Reset (Admin)</summary>
+<div style="margin-top:.7rem">
 <input type="password" id="ap" placeholder="Admin Password (pwd_1234)">
-<input id="ns" placeholder="New SSID">
-<input type="password" id="np" placeholder="New Password">
+<button class="btn btn-s" onclick="scanWifi()">📶 Scan Nearby Wi-Fi</button>
+<select id="ws" onchange="pickWifi(this)"><option value="">-- เลือก Wi-Fi (หรือกด Scan) --</option></select>
+<input id="ns" placeholder="Wi-Fi SSID">
+<input type="password" id="np" placeholder="Wi-Fi Password">
 <button class="btn btn-s" onclick="chWifi()">Apply New Wi-Fi</button>
 <button class="btn btn-d" onclick="rst()">🔄 Factory Reset Wi-Fi</button>
-</div></details></div>
+</div></details>
+</div>
 <script>
-function toast(s,ok){{const e=document.getElementById('m');e.style.display='block';e.style.background=ok?'#2ed57333':'#ff475733';e.style.color=ok?'#7bed9f':'#ff6b81';e.innerText=s;setTimeout(()=>e.style.display='none',4000)}}
-function wake(){{fetch('/api/wake',{{method:'POST'}}).then(r=>r.json()).then(d=>toast(d.status=='ok'?'⚡ Sent to '+d.mac:d.message,d.status=='ok')).catch(e=>toast(e,0))}}
-function saveMac(){{fetch('/api/config',{{method:'POST',body:'mac='+encodeURIComponent(document.getElementById('mac').value)}}).then(r=>r.json()).then(d=>{{if(d.status=='ok'){{toast('✅ Saved: '+d.mac,1);document.getElementById('mdisp').innerText=d.mac}}else toast(d.message,0)}})}}
+function toast(s,ok){{const e=document.getElementById('m');e.style.display='block';e.style.background=ok?'#2ed57329':'#ff475729';e.style.color=ok?'#2ed573':'#ff4757';e.style.border='1px solid '+(ok?'#2ed57355':'#ff475755');e.innerText=s;setTimeout(()=>e.style.display='none',4500)}}
+function checkStatus(){{fetch('/api/status').then(r=>r.json()).then(d=>{{const s=document.getElementById('st');if(d.online){{s.className='badge b-on';s.innerText='🟢 PC Online'}}else{{s.className='badge b-off';s.innerText='🔴 PC Offline'}}if(d.online&&window.waking){{window.waking=false;toast('🎉 Target PC is now ONLINE!',1)}}}}).catch(()=>{{}})}}
+function wake(){{window.waking=true;const s=document.getElementById('st');s.className='badge b-waking';s.innerText='🟡 Waking up...';fetch('/api/wake',{{method:'POST'}}).then(r=>r.json()).then(d=>{{toast(d.status=='ok'?'⚡ Magic packet broadcasted to '+d.mac:d.message,d.status=='ok');for(let i=1;i<=8;i++)setTimeout(checkStatus,i*2500)}}).catch(e=>toast(e,0))}}
+function saveMac(){{const v=document.getElementById('mac').value.trim();fetch('/api/config',{{method:'POST',body:'mac='+encodeURIComponent(v)}}).then(r=>r.json()).then(d=>{{if(d.status=='ok'){{toast('✅ Saved: '+d.mac,1);document.getElementById('mdisp').innerText=d.mac;checkStatus()}}else toast(d.message,0)}})}}
+function pickMac(m){{document.getElementById('mac').value=m;saveMac()}}
+function scanLan(){{const dl=document.getElementById('dl');dl.innerHTML='<div style="text-align:center;color:var(--s);font-size:.8rem;padding:.5rem">🔍 Scanning LAN...</div>';fetch('/api/scan-lan',{{method:'POST'}}).catch(()=>{{}});setTimeout(()=>{{fetch('/api/devices').then(r=>r.json()).then(list=>{{if(!list||!list.length){{dl.innerHTML='<div style="text-align:center;color:var(--s);font-size:.8rem;padding:.5rem">No devices detected yet</div>';return}}let h='';list.forEach(d=>{{h+='<div class="dev-item"><div><div class="dev-ip">'+d.ip+'</div><div class="dev-mac">'+d.mac+' ('+d.ago+'s ago)</div></div><button class="btn-pick" onclick="pickMac(\''+d.mac+'\')">👉 Use Target</button></div>'}});dl.innerHTML=h}}).catch(e=>{{dl.innerHTML='<div style="color:var(--d);font-size:.8rem">'+e+'</div>'}})}},1200)}}
+function scanWifi(){{fetch('/api/wifi/scan').then(r=>r.json()).then(list=>{{const sel=document.getElementById('ws');sel.innerHTML='<option value="">-- เลือก Wi-Fi --</option>';list.forEach(w=>{{const opt=document.createElement('option');opt.value=w.ssid;opt.text='📶 '+w.ssid+' ('+w.rssi+' dBm)';sel.appendChild(opt)}});toast('✅ Found '+list.length+' Wi-Fi networks',1)}}).catch(e=>toast(e,0))}}
+function pickWifi(s){{if(s.value)document.getElementById('ns').value=s.value}}
+function copyHook(){{const u=document.getElementById('hu');u.select();navigator.clipboard.writeText(u.value).then(()=>toast('📋 Copied Shortcut URL!',1))}}
 function chWifi(){{const a=document.getElementById('ap').value,s=document.getElementById('ns').value,p=document.getElementById('np').value;fetch('/api/wifi',{{method:'POST',body:'admin='+encodeURIComponent(a)+'&ssid='+encodeURIComponent(s)+'&password='+encodeURIComponent(p)}}).then(r=>r.json()).then(d=>toast(d.message,d.status=='ok'))}}
 function rst(){{const a=document.getElementById('ap').value;if(!confirm('Reset Wi-Fi?'))return;fetch('/api/reset',{{method:'POST',body:'admin='+encodeURIComponent(a)}}).then(r=>r.json()).then(d=>toast(d.message,d.status=='ok'))}}
+checkStatus();setInterval(checkStatus,10000);
 </script></body></html>"#,
         ssid = ssid,
         ip = ip,
@@ -131,6 +175,22 @@ pub fn parse_station_request(data: &[u8]) -> StationHttpRequest {
 
     if (method == "POST" && path == "/api/wake") || ((method == "GET" || method == "HEAD") && path == "/wake") {
         return StationHttpRequest::Wake;
+    }
+
+    if (method == "GET" || method == "HEAD") && path == "/api/devices" {
+        return StationHttpRequest::GetDevices;
+    }
+
+    if (method == "GET" || method == "HEAD") && path == "/api/status" {
+        return StationHttpRequest::GetStatus;
+    }
+
+    if (method == "POST" || method == "GET") && path == "/api/scan-lan" {
+        return StationHttpRequest::ScanLan;
+    }
+
+    if (method == "GET" || method == "POST") && path == "/api/wifi/scan" {
+        return StationHttpRequest::ScanWifi;
     }
 
     if path == "/favicon.ico" {
