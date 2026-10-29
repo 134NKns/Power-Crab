@@ -47,7 +47,11 @@ fn main() -> ! {
     let mut storage = Storage::new();
     let saved_wifi = match storage.load_wifi() {
         Ok(Some(creds)) => {
-            println!("💾 Found saved Wi-Fi in Flash: '{}'", creds.ssid);
+            println!(
+                "💾 Found saved Wi-Fi in Flash: '{}' (pass_len: {})",
+                creds.ssid,
+                creds.password.len()
+            );
             Some(creds)
         }
         Ok(None) => {
@@ -113,8 +117,11 @@ fn main() -> ! {
             match controller.is_connected() {
                 Ok(true) => {
                     if !connected_logged {
-                        println!("📶 Wi-Fi Layer Connected! Waiting for DHCP IP...");
+                        println!("📶 Wi-Fi Layer Connected! Requesting DHCP IP...");
                         connected_logged = true;
+                        // Reset DHCP state to send DISCOVER immediately now that link is up
+                        let dhcp_sock = sockets.get_mut::<Dhcpv4Socket>(dhcp_handle);
+                        dhcp_sock.reset();
                     }
 
                     // Poll DHCP client socket
@@ -149,12 +156,12 @@ fn main() -> ! {
             }
 
             loop_count += 1;
-            if loop_count % 500 == 0 {
-                if let Some(ip) = assigned_ip {
-                    println!("🦀 Power-Crab Active [IP: {}] - Ready for Wake-on-LAN commands", ip);
-                } else {
-                    println!("🦀 Power-Crab connecting to '{}'...", creds.ssid);
-                }
+            if loop_count % 100 == 0 {
+                println!(
+                    "📡 STA Status: {:?} | Assigned IP: {:?}",
+                    controller.is_connected(),
+                    assigned_ip
+                );
             }
 
             delay.delay_millis(10);
